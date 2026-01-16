@@ -30,6 +30,7 @@ class GazeboInterface(Node):
         self.entity_pose_x = 0.0
         self.entity_pose_y = 0.0
 
+        # 보상 위치 좌표 설정하는곳
         self.goal_pose_candidates = [
             (-1.05,-4.0),
             (-1.05,-3.5),
@@ -69,7 +70,7 @@ class GazeboInterface(Node):
             self.task_failed_callback,
             callback_group=self.callback_group
         )
-
+    # 가제보 모델 열기
     def open_entity(self):
         package_share = get_package_share_directory('turtlebot3_gazebo')
         model_path = os.path.join(
@@ -77,10 +78,11 @@ class GazeboInterface(Node):
         )
         with open(model_path, 'r') as f:
             self.entity = f.read()
-
+    # 보상 위치 좌표 생성 함수
     def generate_goal_pose(self):
         self.entity_pose_x, self.entity_pose_y = random.choice(self.goal_pose_candidates)
 
+    # 보상 위치에 모델 스폰하는 함수
     def spawn_entity(self):
         if ROS_DISTRO == 'humble':
             entity_pose = Pose()
@@ -119,7 +121,8 @@ class GazeboInterface(Node):
                 '--req', req
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL)
-
+    
+    # 보상 모델 삭제 함수
     def delete_entity(self):
         if ROS_DISTRO == 'humble':
             delete_req = DeleteEntity.Request()
@@ -141,16 +144,17 @@ class GazeboInterface(Node):
                 '--req', req
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL)
-
+    # 시뮬레이션 상태 리셋 함수
     def reset_simulation(self):
         reset_req = Empty.Request()
         while not self.reset_simulation_client.wait_for_service(timeout_sec=1.0):
             pass
         self.reset_simulation_client.call_async(reset_req)
 
+    # 보상 위치 재설정 콜백 함수
     def task_succeed_callback(self, request, response):
         self.delete_entity()
-        time.sleep(0.1)
+        time.sleep(0.1) # 여기서 딜레이를 고치면 시뮬레이션 속도 개선 가능함 (하지만 너무 짧게해도 오류남)
         self.generate_goal_pose()
         time.sleep(0.1)
         self.spawn_entity()
@@ -158,7 +162,7 @@ class GazeboInterface(Node):
         response.pose_y = self.entity_pose_y
         response.success = True
         return response
-
+    # 실패시 콜백 함수
     def task_failed_callback(self, request, response):
         self.delete_entity()
         time.sleep(0.1)
@@ -172,7 +176,7 @@ class GazeboInterface(Node):
         response.pose_y = self.entity_pose_y
         response.success = True
         return response
-
+    # 환경 초기화 콜백 함수
     def initialize_env_callback(self, request, response):
         self.delete_entity()
         time.sleep(0.1)

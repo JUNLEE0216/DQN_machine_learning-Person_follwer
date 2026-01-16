@@ -14,9 +14,10 @@ def generate_launch_description():
     pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-    x_pose = LaunchConfiguration('x_pose', default='-2.4')
-    y_pose = LaunchConfiguration('y_pose', default='-3.9')
+    x_pose = LaunchConfiguration('x_pose', default='-2.4')  # 이 부분을 수정해서 와플파이의
+    y_pose = LaunchConfiguration('y_pose', default='-3.9')  # 초기 위치 좌표를 설정할수있음
 
+    # 월드 파일 경로 설정
     world = os.path.join(
         get_package_share_directory('turtlebot3_gazebo'),
         'worlds',
@@ -55,7 +56,7 @@ def generate_launch_description():
 
     ld = LaunchDescription()
 
-    # Add the commands to the launch description
+   
     ld.add_action(gzserver_cmd)
     ld.add_action(gzclient_cmd)
     ld.add_action(robot_state_publisher_cmd)

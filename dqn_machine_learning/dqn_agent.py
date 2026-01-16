@@ -69,7 +69,7 @@ class DQNAgent(Node):
         self.learning_rate = 0.0007
         self.epsilon = 1.0
         self.step_counter = 0
-        self.epsilon_decay = 10000 * self.stage
+        self.epsilon_decay = 10000 * self.stage # 뒤 코드에 설명이 나오지만 앱실론 값들은 매우중요함!
         self.epsilon_min = 0.05
         self.batch_size = 128
 
@@ -264,35 +264,46 @@ class DQNAgent(Node):
         center = state[0][3] # 3번째 관측 요소
         right = state[0][4] # 4번째 관측 요소
 
-        # train_mode = True  → 학습 중 (탐색 + 회피 + ε-greedy)
-        # train_mode = False → 테스트/실행 모드 (탐색 없음)
+        # train_mode = True   학습 중 (탐색 + 회피 + ε-greedy)
+        # train_mode = False  테스트/실행 모드 (탐색 없음)
         if self.train_mode:
-            # [1] 장애물 회피 모드 (avoid_mode) 동작 중일 때
+            # 1. 장애물 회피 모드 (avoid_mode) 동작 중일 때
             if self.avoid_mode:
-                self.avoid_counter += 1
-
+                self.avoid_counter += 1 # 회피 동작마다 카운트 증가
+                
+                # 이건 회피 모드 해제 조건인데
+                # 정면 거리가 충분히 멀어질때
+                # 회피 동작이 일정 스텝 이상 진행됐을때 
                 if center > self.AVOID_RELEASE_DIST and self.avoid_counter >= self.MAX_AVOID_STEP:
                     self.avoid_mode = False
                     self.avoid_counter = 0
                 else:
+                    # 아직 회피 중이면 좌/우 중에 더 넓은 쪽으로 이동
                     if left < right:
                         return 2
                     else:
                         return 1
-
+            
+            # 2. 정면에 장애물이 가까이 있을 경우  회피 모드 진입
             if center < self.AVOID_DIST:
                 self.avoid_mode = True
                 self.avoid_counter = 0
 
+                # 좌/우 중 더 넓은 쪽으로 회피 방향 결정
                 if left < right:
-                    return 2
+                    return 2   
                 else:
-                    return 1
-
+                    return 1  
+                
+            # 3. ε-greedy 탐색을 위한 epsilon 값 업데이트
             self.step_counter += 1
             self.epsilon = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(
                 -1.0 * self.step_counter / self.epsilon_decay
             )
+            # 중요!! 학습이 진행될수록 앱실론 값이 점점 줄어들어 
+            # 랜덤 행동 확률이 낮아지고 학습 기반 행동 비율이 증가함
+            # 그래서 학습 초반에 앱실론 값을 천천히 줄이는 것이 매우 중요!!
+            # 앱실론 값의 조절이 학습 성능에 큰 영향을 미친다
 
             if random.random() < self.epsilon:
                 return random.randint(0, self.action_size - 1)
@@ -301,6 +312,8 @@ class DQNAgent(Node):
 
         else:
             return numpy.argmax(self.model.predict(state))
+    
+    # 환경에서 액션 수행 및 다음 상태, 보상, 종료 여부를 받는 함수
     def step(self, action):
         req = Dqn.Request()
         req.action = action
@@ -308,9 +321,10 @@ class DQNAgent(Node):
         while not self.rl_agent_interface_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('rl_agent interface service not available, waiting again...')
 
-        future = self.rl_agent_interface_client.call_async(req)
+        future = self.rl_agent_interface_client.call_async(req) 
 
         rclpy.spin_until_future_complete(self, future)
+
 
         if future.result() is not None:
             next_state = future.result().state
@@ -323,10 +337,11 @@ class DQNAgent(Node):
 
         return next_state, reward, done
 
+    # keras sequential 을 사용해 q-network 모델 생성하는 함수
     def create_qnetwork(self):
         model = Sequential()
         model.add(Input(shape=(self.state_size,)))
-        model.add(Dense(512, activation='relu'))
+        model.add(Dense(512, activation='relu')) 
         model.add(Dense(256, activation='relu'))
         model.add(Dense(128, activation='relu'))
         model.add(Dense(self.action_size, activation='linear'))
@@ -334,15 +349,17 @@ class DQNAgent(Node):
         model.summary()
 
         return model
-
+    # 타겟 모델 업데이트 함수
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
         self.target_update_after_counter = 0
         print('*Target model updated*')
 
+    # 리플레이에 샘플 추가 함수
     def append_sample(self, transition):
         self.replay_memory.append(transition)
 
+    # 미니배치를 사용해 모델 학습하는 함수
     def train_model(self, terminal):
         if len(self.replay_memory) < self.min_replay_memory_size:
             return

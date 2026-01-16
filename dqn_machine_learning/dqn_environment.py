@@ -16,37 +16,36 @@ from std_srvs.srv import Empty
 from turtlebot3_msgs.srv import Dqn, Goal
 
 ROS_DISTRO = os.environ.get('ROS_DISTRO')
-COLLISION_DIST = 0.15
+COLLISION_DIST = 0.15 # 충돌로 간주하는 거리
 
 
 class RLEnvironment(Node):
-
     def __init__(self):
         super().__init__('rl_environment')
 
-        self.goal_pose_x = 0.0
+        self.goal_pose_x = 0.0 
         self.goal_pose_y = 0.0
         self.robot_pose_x = 0.0
         self.robot_pose_y = 0.0
 
-        self.action_size = 5
-        self.max_step = 800
+        self.action_size = 5 # 각도 5가지
+        self.max_step = 800 # 최대 스텝수(최대 스텝수가 넘어가면 실패 처리하기 때문에 이것도 조절 요망)
 
         self.done = False
         self.fail = False
         self.succeed = False
-        self.state_size = 14
+        self.state_size = 14 # 상태 크기(거리, 각도, 레이저 스캔 데이터)
 
-        self.goal_angle = 0.0
-        self.goal_distance = 1.0
-        self.init_goal_distance = 0.5
-        self.prev_goal_distance = 0.5
+        self.goal_angle = 0.0 # 보상과의 각도
+        self.goal_distance = 1.0 # 보상과의 거리
+        self.init_goal_distance = 0.5 
+        self.prev_goal_distance = 0.5 
 
         self.scan_ranges = []
         self.front_ranges = []
         self.front_angles = []
 
-        self.min_obstacle_distance = 10.0
+        self.min_obstacle_distance = 10.0 # 장애물과의 최소 거리
 
         self.local_step = 0
         self.stop_cmd_vel_timer = None
@@ -80,7 +79,7 @@ class RLEnvironment(Node):
         self.reset_environment_service = self.create_service(
             Dqn, 'reset_environment', self.reset_environment_callback
         )
-
+    # 환경 초기화 콜백 함수
     def make_environment_callback(self, request, response):
         while not self.initialize_environment_client.wait_for_service(timeout_sec=1.0):
             pass
@@ -90,7 +89,7 @@ class RLEnvironment(Node):
         self.goal_pose_x = result.pose_x
         self.goal_pose_y = result.pose_y
         return response
-
+    # 환경 리셋 콜백 함수
     def reset_environment_callback(self, request, response):
         state = self.calculate_state()
         self.init_goal_distance = state[0]
@@ -98,6 +97,7 @@ class RLEnvironment(Node):
         response.state = state
         return response
 
+    # 성공시 콜백 함수
     def call_task_succeed(self):
         while not self.task_succeed_client.wait_for_service(timeout_sec=1.0):
             pass
@@ -107,6 +107,7 @@ class RLEnvironment(Node):
         self.goal_pose_x = res.pose_x
         self.goal_pose_y = res.pose_y
 
+    # 실패시 콜백 함수
     def call_task_failed(self):
         while not self.task_failed_client.wait_for_service(timeout_sec=1.0):
             pass
@@ -116,6 +117,7 @@ class RLEnvironment(Node):
         self.goal_pose_x = res.pose_x
         self.goal_pose_y = res.pose_y
 
+    # 스캔 콜백 함수
     def scan_sub_callback(self, scan):
         self.scan_ranges = []
         self.front_ranges = []
@@ -127,13 +129,13 @@ class RLEnvironment(Node):
             angle = scan.angle_min + i * scan.angle_increment
 
             if distance == float('Inf'):
-                distance = 3.5
+                distance = 3.5 
             elif numpy.isnan(distance):
                 distance = 0.0
 
             self.scan_ranges.append(distance)
 
-            if -math.pi / 2 <= angle <= math.pi / 2:
+            if -math.pi / 2 <= angle <= math.pi / 2: 
                 self.front_ranges.append(distance)
 
                 if math.pi / 6 < angle <= math.pi / 2:
@@ -168,7 +170,7 @@ class RLEnvironment(Node):
             self.goal_angle -= 2 * math.pi
         elif self.goal_angle < -math.pi:
             self.goal_angle += 2 * math.pi
-
+    # 상태 계산 함수인데 여기서 보상과의 거리, 각도, 스캔 데이터들을 상태로 반환한다
     def calculate_state(self):
         left = min(self.left_ranges) if self.left_ranges else 3.5
         center = min(self.front_center_ranges) if self.front_center_ranges else 3.5
@@ -182,11 +184,11 @@ class RLEnvironment(Node):
             right
         ]
 
-        self.local_step += 1
+        self.local_step += 1 
         if self.local_step < 10:
             return state
 
-        if self.goal_distance < 0.25:
+        if self.goal_distance < 0.25: # 보상에 도달하는 거리(이것도 조절시 학습에 도움됐음)
             self.succeed = True
             self.done = True
             self.local_step = 0
@@ -195,14 +197,14 @@ class RLEnvironment(Node):
                 self.cmd_vel_pub.publish(Twist())
             return state
 
-        if self.min_obstacle_distance < 0.25:
+        if self.min_obstacle_distance < 0.25: # 충돌 거리 (이것도 조절을 많이 했지만 0.25가 제일 나았음)
             self.fail = True
             self.done = True
             self.local_step = 0
             self.call_task_failed()
             return state
 
-        if self.local_step >= self.max_step:
+        if self.local_step >= self.max_step: # 최대 스텝수 초과시 실패 처리
             self.fail = True
             self.done = True
             self.local_step = 0
@@ -223,6 +225,7 @@ class RLEnvironment(Node):
         dists = numpy.clip(front_ranges[mask] - 0.25, 1e-2, 3.5)
         return -numpy.mean(numpy.exp(-3.0 * dists))
 
+    # 보상 계산 함수
     def calculate_reward(self):
         distance_reward = self.prev_goal_distance - self.goal_distance
         self.prev_goal_distance = self.goal_distance
@@ -239,28 +242,13 @@ class RLEnvironment(Node):
         if self.succeed:
             reward = 100.0
         elif self.fail:
-            reward = -200.0
+            reward = -200.0 # 원래 값보다 -200이 더 학습에 도움된거 같음
 
         return reward
 
+    # RL 에이전트 인터페이스 콜백 함수
     def rl_agent_interface_callback(self, request, response):
         action = request.action
-
-        #right_front = min(self.front_ranges[len(self.front_ranges)//2:])
-        #left_front  = min(self.front_ranges[:len(self.front_ranges)//2])
-
-        #SAFE_DIST = 0.25
-
-
-        #if right_front < SAFE_DIST and action in [3, 4]:
-            #action = 1
-
-
-        #elif left_front < SAFE_DIST and action in [0, 1]:
-            #action = 3
-
-
-
 
         if ROS_DISTRO == 'humble':
             msg = Twist()
@@ -287,14 +275,14 @@ class RLEnvironment(Node):
             self.fail = False
 
         return response
-
+    # 타이머 콜백 함수
     def timer_callback(self):
         if ROS_DISTRO == 'humble':
             self.cmd_vel_pub.publish(Twist())
         else:
             self.cmd_vel_pub.publish(TwistStamped())
         self.destroy_timer(self.stop_cmd_vel_timer)
-
+    # 쿼터니안을 오일러 각도로 변환한다는데 이건 이해하지 못함
     def euler_from_quaternion(self, quat):
         x, y, z, w = quat.x, quat.y, quat.z, quat.w
 
